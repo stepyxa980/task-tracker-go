@@ -24,10 +24,11 @@ var (
 
 type Task struct {
 	// Task Structure
-	ID   int    `json:"id"`   // Уникальный идентификатор задачи
-	Name string `json:"name"` // Краткое название задачи
-	Text string `json:"text"` // Подробное описание задачи
-	Done bool   `json:"done"`
+	ID         int    `json:"id"`
+	Name       string `json:"name"`
+	Text       string `json:"text"`
+	Done       bool   `json:"done"`
+	InProgress bool   `json:"inProgress"`
 }
 
 type TaskManager struct {
@@ -40,7 +41,8 @@ type TaskManager struct {
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: taskmanager <command> [arguments]")
-		fmt.Println("Commands: add <name> <text>, read, update <id>, delete <id>")
+		fmt.Println("Commands: add <name> <text>, read, update <id>, delete <id>, progress <id>, done <id>")
+		fmt.Println("Additional commands: list-done, list-not-done, list-in-progress")
 		return
 	}
 
@@ -103,6 +105,46 @@ func CommandHandler(tm *TaskManager, command string, args []string) error {
 			return fmt.Errorf("%w: task ID must be a positive integer", ErrInvalidArgs)
 		}
 		return tm.DeleteTask(id)
+	// Новые команды
+	case "progress":
+		if len(args) < 1 {
+			return fmt.Errorf("%w: progress requires task ID", ErrInvalidArgs)
+		}
+		id, err := strconv.Atoi(args[0])
+		if err != nil || id <= 0 {
+			return fmt.Errorf("%w: task ID must be a positive integer", ErrInvalidArgs)
+		}
+		return tm.MarkTaskInProgress(id)
+	case "done":
+		if len(args) < 1 {
+			return fmt.Errorf("%w: done requires task ID", ErrInvalidArgs)
+		}
+		id, err := strconv.Atoi(args[0])
+		if err != nil || id <= 0 {
+			return fmt.Errorf("%w: task ID must be a positive integer", ErrInvalidArgs)
+		}
+		return tm.MarkTaskDone(id)
+	case "list-done":
+		text, err := tm.ListDoneTasks()
+		if err != nil {
+			return err
+		}
+		fmt.Println(text)
+		return nil
+	case "list-not-done":
+		text, err := tm.ListNotDoneTasks()
+		if err != nil {
+			return err
+		}
+		fmt.Println(text)
+		return nil
+	case "list-in-progress":
+		text, err := tm.ListInProgressTasks()
+		if err != nil {
+			return err
+		}
+		fmt.Println(text)
+		return nil
 	default:
 		return fmt.Errorf("unknown command: %s", command)
 	}
@@ -110,10 +152,11 @@ func CommandHandler(tm *TaskManager, command string, args []string) error {
 
 func (tm *TaskManager) AddTask(name, text string) error {
 	task := Task{
-		ID:   tm.nextID,
-		Name: name,
-		Text: text,
-		Done: false,
+		ID:         tm.nextID,
+		Name:       name,
+		Text:       text,
+		Done:       false,
+		InProgress: false,
 	}
 
 	tm.tasks = append(tm.tasks, task)
@@ -129,15 +172,20 @@ func (tm *TaskManager) TaskList() (string, error) {
 
 	var OutputStr string
 
-	OutputStr += fmt.Sprintf("%-4s %-20s %-30s %-6s\n", "ID", "Name", "Text", "Done")
-	OutputStr += fmt.Sprintln("------------------------------------------------------------")
+	OutputStr += fmt.Sprintf("%-4s %-20s %-30s %-6s %-12s\n", "ID", "Name", "Text", "Done", "In Progress")
+	OutputStr += fmt.Sprintln("---------------------------------------------------------------------------")
 
 	for _, task := range tm.tasks {
-		status := "No"
+		doneStatus := "No"
 		if task.Done {
-			status = "Yes"
+			doneStatus = "Yes"
 		}
-		OutputStr += fmt.Sprintf("%-4d %-20s %-30s %-6s\n", task.ID, task.Name, task.Text, status)
+		progressStatus := "No"
+		if task.InProgress {
+			progressStatus = "Yes"
+		}
+		OutputStr += fmt.Sprintf("%-4d %-20s %-30s %-6s %-12s\n",
+			task.ID, task.Name, task.Text, doneStatus, progressStatus)
 	}
 
 	return OutputStr, nil
@@ -148,10 +196,105 @@ func (tm *TaskManager) UpdateTaskStatus(id int) error {
 		task := &tm.tasks[i]
 		if task.ID == id {
 			task.Done = !task.Done
+			if task.Done {
+				task.InProgress = false
+			}
 			return nil
 		}
 	}
 	return fmt.Errorf("%w: task with ID %d not found", ErrTaskNotFound, id)
+}
+
+func (tm *TaskManager) MarkTaskInProgress(id int) error {
+	for i := range tm.tasks {
+		task := &tm.tasks[i]
+		if task.ID == id {
+			task.InProgress = true
+			task.Done = false
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: task with ID %d not found", ErrTaskNotFound, id)
+}
+
+func (tm *TaskManager) MarkTaskDone(id int) error {
+	for i := range tm.tasks {
+		task := &tm.tasks[i]
+		if task.ID == id {
+			task.Done = true
+			task.InProgress = false
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: task with ID %d not found", ErrTaskNotFound, id)
+}
+
+func (tm *TaskManager) ListDoneTasks() (string, error) {
+	var doneTasks []Task
+	for _, task := range tm.tasks {
+		if task.Done {
+			doneTasks = append(doneTasks, task)
+		}
+	}
+
+	if len(doneTasks) == 0 {
+		return "No done tasks found", nil
+	}
+
+	return tm.formatTaskList(doneTasks, "Done Tasks")
+}
+
+func (tm *TaskManager) ListNotDoneTasks() (string, error) {
+	var notDoneTasks []Task
+	for _, task := range tm.tasks {
+		if !task.Done {
+			notDoneTasks = append(notDoneTasks, task)
+		}
+	}
+
+	if len(notDoneTasks) == 0 {
+		return "No not-done tasks found", nil
+	}
+
+	return tm.formatTaskList(notDoneTasks, "Not Done Tasks")
+}
+
+func (tm *TaskManager) ListInProgressTasks() (string, error) {
+	var inProgressTasks []Task
+	for _, task := range tm.tasks {
+		if task.InProgress {
+			inProgressTasks = append(inProgressTasks, task)
+		}
+	}
+
+	if len(inProgressTasks) == 0 {
+		return "No in-progress tasks found", nil
+	}
+
+	return tm.formatTaskList(inProgressTasks, "In Progress Tasks")
+}
+
+func (tm *TaskManager) formatTaskList(tasks []Task, title string) (string, error) {
+	var outputStr string
+
+	outputStr += fmt.Sprintf("%s:\n", title)
+	outputStr += fmt.Sprintf("%-4s %-20s %-30s %-6s %-12s\n", "ID", "Name", "Text", "Done", "In Progress")
+	outputStr += fmt.Sprintln("---------------------------------------------------------------------------")
+
+	for _, task := range tasks {
+		doneStatus := "No"
+		if task.Done {
+			doneStatus = "Yes"
+		}
+		progressStatus := "No"
+		if task.InProgress {
+			progressStatus = "Yes"
+		}
+		outputStr += fmt.Sprintf("%-4d %-20s %-30s %-6s %-12s\n",
+			task.ID, task.Name, task.Text, doneStatus, progressStatus)
+	}
+
+	return outputStr, nil
 }
 
 func (tm *TaskManager) DeleteTask(id int) error {
