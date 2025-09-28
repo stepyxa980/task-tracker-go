@@ -6,12 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
-)
-
-var (
-	ErrFileIsNil    = errors.New("file is nil")
-	ErrInvalidArgs  = errors.New("invalid arguments")
-	ErrTaskNotFound = errors.New("task not found")
+	"strconv"
+	"strings"
 )
 
 const (
@@ -19,14 +15,23 @@ const (
 	FilePerm     = 0644
 )
 
+var (
+	// Основные ошибки
+	ErrFileIsNil    = errors.New("file is nil")
+	ErrInvalidArgs  = errors.New("invalid arguments")
+	ErrTaskNotFound = errors.New("task not found")
+)
+
 type Task struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
-	Text string `json:"text"`
+	// Task Structure
+	ID   int    `json:"id"`   // Уникальный идентификатор задачи
+	Name string `json:"name"` // Краткое название задачи
+	Text string `json:"text"` // Подробное описание задачи
 	Done bool   `json:"done"`
 }
 
 type TaskManager struct {
+	// Task management structure
 	tasks    []Task
 	nextID   int
 	fileName string
@@ -45,7 +50,7 @@ func main() {
 		log.Fatalf("Failed to load tasks: %v", err)
 	}
 
-	if err := handleCommand(tm, os.Args[1], os.Args[2:]); err != nil {
+	if err := CommandHandler(tm, os.Args[1], os.Args[2:]); err != nil {
 		log.Printf("Command failed: %v", err)
 	}
 
@@ -54,39 +59,48 @@ func main() {
 	}
 }
 
-func NewTaskManager(fileName string) *TaskManager {
+func NewTaskManager(newFileName string) *TaskManager {
+	// Create and transfer a new TaskManager, where the first object is at ID: 1
 	return &TaskManager{
 		tasks:    make([]Task, 0),
 		nextID:   1,
-		fileName: fileName,
+		fileName: newFileName,
 	}
 }
 
-func handleCommand(tm *TaskManager, command string, args []string) error {
+func CommandHandler(tm *TaskManager, command string, args []string) error {
 	switch command {
 	case "add":
 		if len(args) < 2 {
 			return fmt.Errorf("%w: add requires name and text", ErrInvalidArgs)
 		}
-		return tm.AddTask(args[0], args[1])
+		err := tm.AddTask(args[0], strings.Join(args[1:], " "))
+		return err
 	case "read":
-		return tm.ListTasks()
+		text, err := tm.TaskList()
+		if err != nil {
+			return err
+		}
+		fmt.Println(text)
+		return nil
 	case "update":
 		if len(args) < 1 {
 			return fmt.Errorf("%w: update requires task ID", ErrInvalidArgs)
 		}
-		var id int
-		if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
-			return fmt.Errorf("invalid task ID: %v", err)
+
+		id, err := strconv.Atoi(args[0])
+		if err != nil || id <= 0 {
+			return fmt.Errorf("%w: task ID must be a positive integer", ErrInvalidArgs)
 		}
+
 		return tm.UpdateTaskStatus(id)
 	case "delete":
 		if len(args) < 1 {
 			return fmt.Errorf("%w: delete requires task ID", ErrInvalidArgs)
 		}
-		var id int
-		if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
-			return fmt.Errorf("invalid task ID: %v", err)
+		id, err := strconv.Atoi(args[0])
+		if err != nil || id <= 0 {
+			return fmt.Errorf("%w: task ID must be a positive integer", ErrInvalidArgs)
 		}
 		return tm.DeleteTask(id)
 	default:
@@ -105,37 +119,35 @@ func (tm *TaskManager) AddTask(name, text string) error {
 	tm.tasks = append(tm.tasks, task)
 	tm.nextID++
 
-	fmt.Printf("Task added successfully (ID: %d)\n", task.ID)
 	return nil
 }
 
-func (tm *TaskManager) ListTasks() error {
+func (tm *TaskManager) TaskList() (string, error) {
 	if len(tm.tasks) == 0 {
-		fmt.Println("No tasks found")
-		return nil
+		return "No tasks found", nil
 	}
 
-	fmt.Printf("%-4s %-20s %-30s %-6s\n", "ID", "Name", "Text", "Done")
-	fmt.Println("------------------------------------------------------------")
+	var OutputStr string
+
+	OutputStr += fmt.Sprintf("%-4s %-20s %-30s %-6s\n", "ID", "Name", "Text", "Done")
+	OutputStr += fmt.Sprintln("------------------------------------------------------------")
+
 	for _, task := range tm.tasks {
 		status := "No"
 		if task.Done {
 			status = "Yes"
 		}
-		fmt.Printf("%-4d %-20s %-30s %-6s\n", task.ID, task.Name, task.Text, status)
+		OutputStr += fmt.Sprintf("%-4d %-20s %-30s %-6s\n", task.ID, task.Name, task.Text, status)
 	}
-	return nil
+
+	return OutputStr, nil
 }
 
 func (tm *TaskManager) UpdateTaskStatus(id int) error {
 	for i := range tm.tasks {
-		if tm.tasks[i].ID == id {
-			tm.tasks[i].Done = !tm.tasks[i].Done
-			status := "completed"
-			if !tm.tasks[i].Done {
-				status = "pending"
-			}
-			fmt.Printf("Task %d marked as %s\n", id, status)
+		task := &tm.tasks[i]
+		if task.ID == id {
+			task.Done = !task.Done
 			return nil
 		}
 	}
